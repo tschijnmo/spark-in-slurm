@@ -3,18 +3,6 @@
 #
 # Start an stand-alone Spark cluster in a SLURM job.
 #
-# This script should be called *within* the current shell.  Then a standalone
-# Spark cluster will be started.  The spark-submit command can next be used to
-# submit the actual job.
-#
-# Before calling this script, the environmental variables SPARK_HOME,
-# JAVA_HOME, and PYTHONPATH need to be set correctly.  And the program
-# `python3` in PATH need to point to the Python interpreter intended to be
-# used.
-#
-# SPARK_LOG_LEVEL can be used to tune the logging level for Spark, by default,
-# only errors are logged due to performance reasons.
-#
 
 if [ -z "${SPARK_HOME}" ]; then
     echo "SPARK_HOME is not set!"
