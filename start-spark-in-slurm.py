@@ -43,6 +43,8 @@ class JobEnv:
                       '-c/--cpus-per-task is not explicitly set,'
                       ' assuming {}'
                   ).format(n_cpu_per_task), file=sys.stderr)
+        else:
+            n_cpu_per_task = int(n_cpu_per_task)
 
         self.python = sys.executable
         self.master_host = platform.node()
@@ -56,7 +58,9 @@ class JobEnv:
     def make_dirs(self):
         """Make the directories and set attributes."""
 
-        job_home = 'Spark-{}-{}'.format(self.job_name, self.job_id)
+        job_home = os.path.abspath(
+            'Spark-{}-{}'.format(self.job_name, self.job_id)
+        )
         self.job_home = job_home
         self.conf_dir = os.path.join(job_home, 'conf')
         self.worker_dir = os.path.join(job_home, 'worker')
@@ -66,7 +70,7 @@ class JobEnv:
             os.makedirs(i, exist_ok=True)
 
         self.conf_file = open(
-            os.path.join(self.conf_dir), 'spark-defaults.conf'
+            os.path.join(self.conf_dir, 'spark-defaults.conf'), 'w'
         )
 
     def gen_confs(self, parallel_factor, log_level):
@@ -94,13 +98,16 @@ class JobEnv:
     def launch(self):
         """Launch the cluster."""
 
+        env = dict(os.environ)
+        env['SPARK_CONF_DIR'] = self.conf_dir
+
         with open(os.path.join(self.job_home, 'master.out'), 'w') as fp:
             subprocess.Popen(
                 [
                     os.path.join(self.spark_home, 'sbin', 'start-master.sh'),
                     '-h', self.master_host, '-p', self.master_port
                 ],
-                stdin=subprocess.DEVNULL, stdout=fp, stderr=fp,
+                stdin=subprocess.DEVNULL, stdout=fp, stderr=fp, env=env,
                 start_new_session=True
             )
         self._wait_master(lambda x: True, 'Launching master')
@@ -113,11 +120,11 @@ class JobEnv:
                     self.master_link,
                     '-d', self.worker_dir
                 ],
-                stdin=subprocess.DEVNULL, stdout=fp, stderr=fp,
+                stdin=subprocess.DEVNULL, stdout=fp, stderr=fp, env=env,
                 start_new_session=True
             )
         stat = self._wait_master(
-            lambda x: len(x['workers']) == self.n_tasks,
+            lambda x: len(x['workers']) >= self.n_tasks,
             'Launching workers'
         )
 
@@ -135,9 +142,9 @@ class JobEnv:
 
         while time.time() - begin_time < timeout:
             try:
-                stat = json.load(urllib.request.urlopen(
+                stat = json.loads(urllib.request.urlopen(
                     'http://{}:8080/json'.format(self.master_host)
-                ))
+                ).read().decode())
             except urllib.error.URLError:
                 pass
             except json.decoder.JSONDecodeError:
