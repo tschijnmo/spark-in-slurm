@@ -23,7 +23,7 @@ class JobEnv:
     """The environment for the current job.
     """
 
-    def __init__(self):
+    def __init__(self, cpus_aside):
         """Initialize the environment."""
 
         self.spark_home = os.environ.get('SPARK_HOME')
@@ -35,20 +35,37 @@ class JobEnv:
         if self.job_name is None or self.job_id is None:
             raise EnvError('Not inside a SLURM job!')
 
-        self.n_tasks = int(os.environ.get('SLURM_NTASKS'))
+        n_tasks = int(os.environ.get('SLURM_NTASKS'))
         n_cpu_per_task = os.environ.get('SLURM_CPUS_PER_TASK')
         if n_cpu_per_task is None:
-            n_cpu_per_task = os.cpu_count()
-            print((
-                      '-c/--cpus-per-task is not explicitly set,'
-                      ' assuming {}'
-                  ).format(n_cpu_per_task), file=sys.stderr)
+            raise EnvError(
+                '-c/--cpus-per-task is not explicitly set!'
+            )
         else:
             n_cpu_per_task = int(n_cpu_per_task)
 
+        if n_cpu_per_task != os.cpu_count():
+            raise EnvError(
+                'CPU {} in SLURM different from physical number of {}'.format(
+                    n_cpu_per_task, os.cpu_count()
+                )
+            )
+
+        head_worker_cpus = n_cpu_per_task - cpus_aside
+        if head_worker_cpus < 0:
+            raise EnvError(
+                'Too many CPUs to set aside for Spark {}'.format(cpus_aside)
+            )
+        self.head_worker_cpus = head_worker_cpus
+        self.full_worker_cpus = n_cpu_per_task
+        self.n_full_workers = n_tasks - 1
+        self.n_cpus = self.n_full_workers * n_cpu_per_task + head_worker_cpus
+        self.n_workers = self.n_full_workers + (
+            1 if head_worker_cpus > 0 else 0
+        )
+
         self.python = sys.executable
         self.master_host = platform.node()
-        self.n_cpus = self.n_tasks * n_cpu_per_task
 
         self.master_port = '7077'
         self.master_link = 'spark://{}:{}'.format(
@@ -112,19 +129,38 @@ class JobEnv:
             )
         self._wait_master(lambda x: True, 'Launching master')
 
+        srun_base_args = [
+            'srun', '--export={}'.format(_EXPORT_ENV)
+        ]
+        worker_args = [
+            os.path.join(self.spark_home, 'sbin', 'start-slave.sh'),
+            self.master_link, '-d', self.worker_dir
+        ]
+
+        if self.head_worker_cpus > 0:
+            with open(os.path.join(self.job_home, 'hworker.out'), 'w') as fp:
+                head_worker_cpus = str(self.head_worker_cpus)
+                subprocess.Popen(
+                    srun_base_args + [
+                        '--relative', '0', '-N', '1', '-n', '1',
+                        '-c', head_worker_cpus
+                    ] + worker_args + ['-c', head_worker_cpus],
+                    stdin=subprocess.DEVNULL, stdout=fp, stderr=fp,
+                    env=env, start_new_session=True
+                )
+
         with open(os.path.join(self.job_home, 'workers.out'), 'w') as fp:
+            n_full_workers = str(self.n_full_workers)
             subprocess.Popen(
-                [
-                    'srun', '--export={}'.format(_EXPORT_ENV),
-                    os.path.join(self.spark_home, 'sbin', 'start-slave.sh'),
-                    self.master_link,
-                    '-d', self.worker_dir
-                ],
+                srun_base_args + [
+                    '--relative', '1', '-N', n_full_workers,
+                    '-n', n_full_workers, '-c', str(self.full_worker_cpus)
+                ] + worker_args,
                 stdin=subprocess.DEVNULL, stdout=fp, stderr=fp, env=env,
                 start_new_session=True
             )
         stat = self._wait_master(
-            lambda x: len(x['workers']) >= self.n_tasks,
+            lambda x: len(x['workers']) >= self.n_workers,
             'Launching workers'
         )
 
@@ -243,9 +279,14 @@ def main():
         help='The factor for default Spark parallelism wrt the number of CPUs.',
         type=float, default=1.0
     )
+    parser.add_argument(
+        '-a', '--cpus-aside',
+        help='The number of CPUs reserved for Spark and driver.',
+        type=int, default=4
+    )
     args = parser.parse_args()
 
-    env = JobEnv()
+    env = JobEnv(args.cpus_aside)
     env.make_dirs()
     env.gen_confs(args.parallel_factor, args.log_level)
     env.launch()
