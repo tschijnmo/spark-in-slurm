@@ -117,6 +117,7 @@ class JobEnv:
 
         env = dict(os.environ)
         env['SPARK_CONF_DIR'] = self.conf_dir
+        env['PYTHONHASHSEED'] = '123'
 
         with open(os.path.join(self.job_home, 'master.out'), 'w') as fp:
             subprocess.Popen(
@@ -251,6 +252,7 @@ _EXPORT_ENV = ','.join([
     'JAVA_HOME',
     'SPARK_CONF_DIR',
     'PYTHONPATH',
+    'PYTHONHASHSEED',
 ])
 
 
