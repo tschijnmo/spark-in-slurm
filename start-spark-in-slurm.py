@@ -35,7 +35,7 @@ class JobEnv:
         if self.job_name is None or self.job_id is None:
             raise EnvError('Not inside a SLURM job!')
 
-        n_tasks = int(os.environ.get('SLURM_NTASKS'))
+        n_tasks = int(os.environ.get('SLURM_NNODES'))
         n_cpu_per_task = os.environ.get('SLURM_CPUS_PER_TASK')
         if n_cpu_per_task is None:
             raise EnvError(
