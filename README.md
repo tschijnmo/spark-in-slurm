@@ -20,9 +20,9 @@ each process set to use all CPUs on the nodes.  This can be easily achieved by
 setting `-N` to the number of nodes and `-c` to the number of physical core on
 the nodes.
 
-Within the SLURM job, the script `start-spark-in-slurm.py` can be invoked so
-that a stand-alone Spark cluster will be started.  To fine tune the behaviour,
-we have the following options,
+Within the SLURM job, the script `start-spark-in-slurm` can be invoked so that
+a stand-alone Spark cluster will be started.  To fine tune the behaviour, we
+have the following options,
 
 
 * `-l/--log-level` The log level for Spark, default to `FATAL`.
